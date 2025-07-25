@@ -70,15 +70,19 @@ class GitHubCodeDownloader:
         return True
 
 def main():
-    # Check for GitHub token in environment variable
-    token = os.environ.get('GITHUB_TOKEN')
+    # Hardcoded GitHub token (replace this with your actual token)
+    token = "YOUR_GITHUB_TOKEN_HERE"
+    
+    # Check for GitHub token in environment variable if not hardcoded
+    if token == "YOUR_GITHUB_TOKEN_HERE":
+        token = os.environ.get('GITHUB_TOKEN')
     
     print("GitHub Code Downloader")
     print("=====================")
     
-    if not token:
+    if not token or token == "YOUR_GITHUB_TOKEN_HERE":
         print("Warning: No GitHub token found. API rate limits will be restricted.")
-        print("Set GITHUB_TOKEN environment variable for better results.")
+        print("Either set GITHUB_TOKEN environment variable or edit the code to add your token.")
     
     downloader = GitHubCodeDownloader(token)
     

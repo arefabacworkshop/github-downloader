@@ -78,16 +78,16 @@ class GitHubCodeDownloader:
         # Create repository folder structure
         repo_folder = repo.replace('/', '_')
         full_destination = os.path.join(destination_folder, repo_folder)
+        os.makedirs(full_destination, exist_ok=True)
         
         # Create folder for file path (preserve directory structure)
         file_dir = os.path.dirname(path)
         if file_dir:
-            full_destination = os.path.join(full_destination, file_dir)
-            os.makedirs(full_destination, exist_ok=True)
-        
-        # Extract filename from path and create full destination path
-        filename = os.path.basename(path)
-        file_path = os.path.join(full_destination, filename)
+            path_dir = os.path.join(full_destination, file_dir)
+            os.makedirs(path_dir, exist_ok=True)
+            file_path = os.path.join(path_dir, os.path.basename(path))
+        else:
+            file_path = os.path.join(full_destination, os.path.basename(path))
         
         # Write content to file
         with open(file_path, 'w', encoding='utf-8', errors='replace') as f:
@@ -199,12 +199,17 @@ def interactive_mode(downloader):
             print("Invalid option.")
 
 def main():
-    # Check for GitHub token in environment variable
-    token = os.environ.get('GITHUB_TOKEN')
+    # Hardcoded GitHub token (replace this with your actual token)
+    token = "YOUR_GITHUB_TOKEN_HERE"
     
-    if not token:
+    # Check for GitHub token in environment variable if not hardcoded
+    if token == "YOUR_GITHUB_TOKEN_HERE":
+        token = os.environ.get('GITHUB_TOKEN')
+        print("Warning: Using placeholder token. For better results, edit the code to add your token.")
+    
+    if not token or token == "YOUR_GITHUB_TOKEN_HERE":
         print("Warning: No GitHub token found. API rate limits will be restricted.")
-        print("Set GITHUB_TOKEN environment variable for better results.")
+        print("Either set GITHUB_TOKEN environment variable or edit the code to add your token.")
     
     downloader = GitHubCodeDownloader(token)
     
