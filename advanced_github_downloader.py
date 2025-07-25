@@ -19,21 +19,49 @@ class GitHubCodeDownloader:
             self.headers["Authorization"] = f"token {token}"
             
     def search_code(self, query, language=None, max_results=100):
-        """Search for code matching query and optional language filter"""
+        """Search for code matching query and optional language filter with pagination support"""
         search_query = quote_plus(query)
         if language:
             search_query += f"+language:{language}"
-            
-        url = f"{self.base_url}/search/code?q={search_query}&per_page={max_results}"
-        response = requests.get(url, headers=self.headers)
         
-        if response.status_code != 200:
-            print(f"Error searching GitHub: {response.status_code}")
-            print(response.json().get('message', 'Unknown error'))
-            return []
+        # Calculate how many pages we need
+        per_page = 100  # GitHub API maximum per page
+        pages_needed = (max_results + per_page - 1) // per_page
+        
+        all_results = []
+        
+        for page in range(1, pages_needed + 1):
+            print(f"Fetching page {page} of {pages_needed}...")
             
-        results = response.json()
-        return results.get('items', [])
+            url = f"{self.base_url}/search/code?q={search_query}&per_page={per_page}&page={page}"
+            response = requests.get(url, headers=self.headers)
+            
+            if response.status_code != 200:
+                print(f"Error searching GitHub: {response.status_code}")
+                print(response.json().get('message', 'Unknown error'))
+                break
+                
+            results = response.json()
+            items = results.get('items', [])
+            
+            if not items:
+                print(f"No more results found on page {page}.")
+                break
+                
+            all_results.extend(items)
+            
+            # Check if we've reached our desired max_results
+            if len(all_results) >= max_results:
+                all_results = all_results[:max_results]
+                break
+                
+            # GitHub API has rate limits - add a small delay between requests
+            if page < pages_needed:
+                import time
+                time.sleep(0.5)  # 500ms delay between requests
+        
+        print(f"Found a total of {len(all_results)} results.")
+        return all_results
     
     def get_file_content(self, repo, path):
         """Get content of a specific file from GitHub"""
