@@ -14,6 +14,7 @@ A Python application that searches GitHub for code matching your query and downl
 - All features from the basic downloader
 - Command-line arguments for non-interactive use
 - Content validation against search terms
+- **Automatically removes files (and their directories) that do not contain the search phrase**
 - Parallel downloading of multiple files
 - **Pagination support** to download more than 100 files
 - Enhanced directory structure preservation
@@ -73,3 +74,4 @@ python advanced_github_downloader.py -q "import qiskit" -l python -n 200 -a
 - Large files or binary files may not download correctly
 - The advanced downloader can fetch more than 100 results using pagination
 - GitHub search results are capped at 1000 items by the API
+- **Files that do not contain the search phrase are automatically deleted, and their directories are cleaned up if empty**

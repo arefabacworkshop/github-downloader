@@ -86,7 +86,11 @@ class GitHubCodeDownloader:
         search_terms = validation_query.lower().split()
         content_lower = content.lower()
         
-        # All search terms must be present
+        # Check for exact phrase match first
+        if validation_query.lower() in content_lower:
+            return True
+            
+        # Fall back to checking if all search terms are present
         return all(term in content_lower for term in search_terms)
     
     def download_file(self, repo, path, destination_folder, validation_query=None):
@@ -97,7 +101,7 @@ class GitHubCodeDownloader:
             
         # Validate content against search query
         if validation_query and not self.validate_file_content(content, validation_query):
-            print(f"File {repo}/{path} did not pass validation.")
+            print(f"File {repo}/{path} did not pass validation. Skipping.")
             return False
             
         # Create destination folder if it doesn't exist
@@ -120,6 +124,29 @@ class GitHubCodeDownloader:
         # Write content to file
         with open(file_path, 'w', encoding='utf-8', errors='replace') as f:
             f.write(content)
+        
+        # Double check after writing (in case of encoding issues)
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                saved_content = f.read()
+            
+            if validation_query and not self.validate_file_content(saved_content, validation_query):
+                print(f"File {repo}/{path} failed post-save validation. Removing.")
+                os.remove(file_path)
+                
+                # Check if directory is empty and remove if it is
+                if file_dir:
+                    parent_dir = os.path.dirname(file_path)
+                    if parent_dir and os.path.exists(parent_dir) and not os.listdir(parent_dir):
+                        os.rmdir(parent_dir)
+                
+                # Check if repo folder is empty and remove if it is
+                if os.path.exists(full_destination) and not os.listdir(full_destination):
+                    os.rmdir(full_destination)
+                    
+                return False
+        except Exception as e:
+            print(f"Error during post-save validation: {e}")
         
         return True
 
@@ -205,6 +232,9 @@ def interactive_mode(downloader):
             validation_option = input("Validate downloaded files against search query? (y/n, default: y): ")
             validation_query = query if validation_option.lower() != 'n' else None
             
+            if validation_query:
+                print("Files that don't contain the search phrase will be automatically removed.")
+            
             selected_items = []
             if selection.lower() == 'all':
                 selected_items = results
@@ -280,6 +310,7 @@ def main():
         validation_query = args.query
         
         print(f"Downloading {len(selected_items)} files...")
+        print("Files that don't contain the search phrase will be automatically removed.")
         successful, failed = downloader.download_files_parallel(
             selected_items, 
             args.destination, 
