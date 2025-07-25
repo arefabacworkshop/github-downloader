@@ -1,1 +1,262 @@
- 
+import os
+import requests
+import base64
+import re
+from urllib.parse import quote_plus
+import json
+import argparse
+from concurrent.futures import ThreadPoolExecutor
+
+class GitHubCodeDownloader:
+    """Advanced GitHub Code Downloader with search validation and parallel downloads"""
+    
+    def __init__(self, token=None):
+        self.base_url = "https://api.github.com"
+        self.headers = {
+            "Accept": "application/vnd.github.v3+json"
+        }
+        if token:
+            self.headers["Authorization"] = f"token {token}"
+            
+    def search_code(self, query, language=None, max_results=100):
+        """Search for code matching query and optional language filter"""
+        search_query = quote_plus(query)
+        if language:
+            search_query += f"+language:{language}"
+            
+        url = f"{self.base_url}/search/code?q={search_query}&per_page={max_results}"
+        response = requests.get(url, headers=self.headers)
+        
+        if response.status_code != 200:
+            print(f"Error searching GitHub: {response.status_code}")
+            print(response.json().get('message', 'Unknown error'))
+            return []
+            
+        results = response.json()
+        return results.get('items', [])
+    
+    def get_file_content(self, repo, path):
+        """Get content of a specific file from GitHub"""
+        url = f"{self.base_url}/repos/{repo}/contents/{path}"
+        response = requests.get(url, headers=self.headers)
+        
+        if response.status_code != 200:
+            print(f"Error getting file content: {response.status_code}")
+            return None
+            
+        content = response.json()
+        if content.get('encoding') == 'base64':
+            return base64.b64decode(content.get('content')).decode('utf-8', errors='replace')
+        return None
+    
+    def validate_file_content(self, content, validation_query):
+        """Validate if file content matches search criteria"""
+        if not content or not validation_query:
+            return True
+        
+        # Simple validation: check if the search terms appear in the content
+        search_terms = validation_query.lower().split()
+        content_lower = content.lower()
+        
+        # All search terms must be present
+        return all(term in content_lower for term in search_terms)
+    
+    def download_file(self, repo, path, destination_folder, validation_query=None):
+        """Download a file from GitHub to local destination if it passes validation"""
+        content = self.get_file_content(repo, path)
+        if not content:
+            return False
+            
+        # Validate content against search query
+        if validation_query and not self.validate_file_content(content, validation_query):
+            print(f"File {repo}/{path} did not pass validation.")
+            return False
+            
+        # Create destination folder if it doesn't exist
+        os.makedirs(destination_folder, exist_ok=True)
+        
+        # Create repository folder structure
+        repo_folder = repo.replace('/', '_')
+        full_destination = os.path.join(destination_folder, repo_folder)
+        
+        # Create folder for file path (preserve directory structure)
+        file_dir = os.path.dirname(path)
+        if file_dir:
+            full_destination = os.path.join(full_destination, file_dir)
+            os.makedirs(full_destination, exist_ok=True)
+        
+        # Extract filename from path and create full destination path
+        filename = os.path.basename(path)
+        file_path = os.path.join(full_destination, filename)
+        
+        # Write content to file
+        with open(file_path, 'w', encoding='utf-8', errors='replace') as f:
+            f.write(content)
+        
+        return True
+
+    def download_files_parallel(self, items, destination_folder, validation_query=None, max_workers=5):
+        """Download multiple files in parallel"""
+        successful = 0
+        failed = 0
+        
+        def download_worker(item):
+            repo = item['repository']['full_name']
+            path = item['path']
+            print(f"Downloading {repo}/{path}...")
+            
+            if self.download_file(repo, path, destination_folder, validation_query):
+                print(f"Successfully downloaded {repo}/{path}")
+                return True
+            else:
+                print(f"Failed to download {repo}/{path}")
+                return False
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            results = list(executor.map(download_worker, items))
+            
+        successful = sum(results)
+        failed = len(results) - successful
+        
+        return successful, failed
+
+def parse_arguments():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(description='GitHub Code Downloader')
+    parser.add_argument('-q', '--query', help='Search query')
+    parser.add_argument('-l', '--language', help='Filter by language')
+    parser.add_argument('-n', '--limit', type=int, default=30, help='Maximum number of results')
+    parser.add_argument('-d', '--destination', default='github_downloads', help='Destination folder')
+    parser.add_argument('-p', '--parallel', type=int, default=5, help='Number of parallel downloads')
+    parser.add_argument('-a', '--all', action='store_true', help='Download all results without prompting')
+    return parser.parse_args()
+
+def interactive_mode(downloader):
+    """Run the downloader in interactive mode"""
+    print("GitHub Code Downloader (Interactive Mode)")
+    print("========================================")
+    
+    while True:
+        print("\n1. Search and download code")
+        print("2. Exit")
+        choice = input("\nChoose an option: ")
+        
+        if choice == '2':
+            break
+            
+        if choice == '1':
+            query = input("Enter search query: ")
+            language = input("Filter by language (optional, press Enter to skip): ")
+            max_results = input("Maximum number of results (default: 30): ")
+            
+            try:
+                max_results = int(max_results) if max_results else 30
+            except ValueError:
+                max_results = 30
+                
+            if not language:
+                language = None
+                
+            print(f"Searching for '{query}'...")
+            results = downloader.search_code(query, language, max_results)
+            
+            if not results:
+                print("No results found.")
+                continue
+                
+            print(f"Found {len(results)} matching files.")
+            
+            for i, item in enumerate(results):
+                repo = item['repository']['full_name']
+                path = item['path']
+                print(f"{i+1}. {repo}/{path}")
+            
+            selection = input("\nEnter numbers to download (comma-separated) or 'all': ")
+            
+            download_dir = "github_downloads"
+            validation_option = input("Validate downloaded files against search query? (y/n, default: y): ")
+            validation_query = query if validation_option.lower() != 'n' else None
+            
+            selected_items = []
+            if selection.lower() == 'all':
+                selected_items = results
+            else:
+                try:
+                    indices = [int(idx.strip()) - 1 for idx in selection.split(',')]
+                    selected_items = [results[idx] for idx in indices if 0 <= idx < len(results)]
+                except ValueError:
+                    print("Invalid selection.")
+                    continue
+            
+            if not selected_items:
+                print("No valid items selected.")
+                continue
+            
+            print(f"Downloading {len(selected_items)} files...")
+            successful, failed = downloader.download_files_parallel(selected_items, download_dir, validation_query)
+            print(f"Download complete: {successful} successful, {failed} failed.")
+        else:
+            print("Invalid option.")
+
+def main():
+    # Check for GitHub token in environment variable
+    token = os.environ.get('GITHUB_TOKEN')
+    
+    if not token:
+        print("Warning: No GitHub token found. API rate limits will be restricted.")
+        print("Set GITHUB_TOKEN environment variable for better results.")
+    
+    downloader = GitHubCodeDownloader(token)
+    
+    # Parse command line arguments
+    args = parse_arguments()
+    
+    # If query is provided, run in command line mode
+    if args.query:
+        print(f"Searching for '{args.query}'...")
+        results = downloader.search_code(args.query, args.language, args.limit)
+        
+        if not results:
+            print("No results found.")
+            return
+            
+        print(f"Found {len(results)} matching files.")
+        
+        # Display results if not downloading all
+        if not args.all:
+            for i, item in enumerate(results):
+                repo = item['repository']['full_name']
+                path = item['path']
+                print(f"{i+1}. {repo}/{path}")
+            
+            selection = input("\nEnter numbers to download (comma-separated) or 'all': ")
+            
+            selected_items = []
+            if selection.lower() == 'all':
+                selected_items = results
+            else:
+                try:
+                    indices = [int(idx.strip()) - 1 for idx in selection.split(',')]
+                    selected_items = [results[idx] for idx in indices if 0 <= idx < len(results)]
+                except ValueError:
+                    print("Invalid selection.")
+                    return
+        else:
+            selected_items = results
+            
+        validation_query = args.query
+        
+        print(f"Downloading {len(selected_items)} files...")
+        successful, failed = downloader.download_files_parallel(
+            selected_items, 
+            args.destination, 
+            validation_query,
+            args.parallel
+        )
+        print(f"Download complete: {successful} successful, {failed} failed.")
+    else:
+        # If no query, run in interactive mode
+        interactive_mode(downloader)
+
+if __name__ == "__main__":
+    main()
